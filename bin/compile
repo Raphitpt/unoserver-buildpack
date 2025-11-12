@@ -1,5 +1,4 @@
 #!/bin/bash
-
 set -e
 
 BUILD_DIR=$1
@@ -8,70 +7,37 @@ ENV_DIR=$3
 
 echo "-----> Installing unoserver buildpack"
 
-# Function to install APT dependencies using Scalingo's apt-buildpack
-install_apt_deps() {
-  local build_dir="$1"
-  local cache_dir="$2"
-  local env_dir="$3"
-
-  echo "-----> Installing dependencies with APT buildpack"
-
-  # Create Aptfile with required packages including python3 and pip
-  cat >> "$build_dir/Aptfile" <<EOF
-libreoffice-writer
-python3
-python3-uno
-python3-pip
-libreoffice-script-provider-python
-fonts-liberation
-fonts-dejavu
-netcat-openbsd
-EOF
-
-  apt_deps_buildpack_dir=$(mktemp -d apt_buildpack_XXXX)
-
-  APT_BUILDPACK_URL="${APT_BUILDPACK_URL:-https://github.com/Scalingo/apt-buildpack}"
-  git clone --depth=1 "$APT_BUILDPACK_URL" "$apt_deps_buildpack_dir"
-
-  "${apt_deps_buildpack_dir}/bin/compile" "$build_dir" "$cache_dir" "$env_dir"
-
-  rm -rf "$apt_deps_buildpack_dir"
-}
-
-# Install APT dependencies
-install_apt_deps "$BUILD_DIR" "$CACHE_DIR" "$ENV_DIR"
-
-# Install unoserver using system Python3 and pip from apt
-echo "-----> Installing unoserver with system Python"
+# Répertoire d'installation du apt-buildpack
 APT_DIR="$BUILD_DIR/.apt"
+
+# Vérifie que python3 du apt-buildpack existe
+if [ ! -f "$APT_DIR/usr/bin/python3" ]; then
+  echo "ERROR: python3 not found in $APT_DIR/usr/bin/"
+  echo "Make sure apt-buildpack is listed BEFORE this buildpack in .buildpacks"
+  echo "and that your Aptfile includes: python3, python3-pip, python3-uno, libreoffice"
+  exit 1
+fi
+
+# Configuration environnement pour l’installation pip
 export PATH="$APT_DIR/usr/bin:$PATH"
 export LD_LIBRARY_PATH="$APT_DIR/usr/lib/x86_64-linux-gnu:$APT_DIR/usr/lib:$LD_LIBRARY_PATH"
 
-# Use pip from apt to install unoserver
-"$APT_DIR/usr/bin/python3" -m pip install --target="$BUILD_DIR/.local/lib/python3/site-packages" unoserver
+# Installation de unoserver dans un dossier local
+PYTHON_SITE_PACKAGES="$BUILD_DIR/.local/lib/python3/site-packages"
+mkdir -p "$PYTHON_SITE_PACKAGES"
 
-## Install custom fonts if they exist
-#if [ -d "$BUILD_DIR/fonts" ]; then
-#    echo "-----> Installing custom fonts"
-#    mkdir -p /usr/share/fonts/truetype/custom/
-#    cp "$BUILD_DIR/fonts/"* /usr/share/fonts/truetype/custom/ || true
-#    fc-cache -f -v
-#fi
+echo "-----> Installing unoserver (with system Python from apt-buildpack)..."
+"$APT_DIR/usr/bin/python3" -m pip install --no-cache-dir --target="$PYTHON_SITE_PACKAGES" unoserver
 
-# Configure environment variables for runtime
-echo "-----> Configuring environment variables"
+# Configuration du profil d’exécution
+echo "-----> Configuring runtime environment"
 PROFILE_PATH="$BUILD_DIR/.profile.d/unoserver.sh"
-mkdir -p $(dirname $PROFILE_PATH)
-cat > $PROFILE_PATH <<'EOF'
-export PATH="/app/.apt/usr/bin:$PATH"
+mkdir -p "$(dirname "$PROFILE_PATH")"
+
+cat > "$PROFILE_PATH" <<'EOF'
+# unoserver runtime environment
+export PYTHONPATH="/app/.local/lib/python3/site-packages:$PYTHONPATH"
 export LD_LIBRARY_PATH="/app/.apt/usr/lib/x86_64-linux-gnu:/app/.apt/usr/lib:$LD_LIBRARY_PATH"
-export PYTHONPATH="/app/.local/lib/python3/site-packages:/app/.apt/usr/lib/python3/dist-packages:$PYTHONPATH"
 EOF
 
-# Make server.sh executable
-if [ -f "$BUILD_DIR/server.sh" ]; then
-    echo "-----> Making server.sh executable"
-    chmod +x "$BUILD_DIR/server.sh"
-fi
-
-echo "-----> Build complete!"
+echo "-----> unoserver buildpack installation complete!"
