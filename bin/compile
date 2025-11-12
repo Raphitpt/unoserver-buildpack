@@ -43,11 +43,12 @@ install_apt_deps "$BUILD_DIR" "$CACHE_DIR" "$ENV_DIR"
 
 # Install unoserver using system Python3 and pip from apt
 echo "-----> Installing unoserver with system Python"
-export PATH="/app/.apt/usr/bin:$PATH"
-export LD_LIBRARY_PATH="/app/.apt/usr/lib/x86_64-linux-gnu:/app/.apt/usr/lib:$LD_LIBRARY_PATH"
+APT_DIR="$BUILD_DIR/.apt"
+export PATH="$APT_DIR/usr/bin:$PATH"
+export LD_LIBRARY_PATH="$APT_DIR/usr/lib/x86_64-linux-gnu:$APT_DIR/usr/lib:$LD_LIBRARY_PATH"
 
 # Use pip from apt to install unoserver
-/app/.apt/usr/bin/python3 -m pip install --target="$BUILD_DIR/.local/lib/python3/site-packages" unoserver
+"$APT_DIR/usr/bin/python3" -m pip install --target="$BUILD_DIR/.local/lib/python3/site-packages" unoserver
 
 ## Install custom fonts if they exist
 #if [ -d "$BUILD_DIR/fonts" ]; then
