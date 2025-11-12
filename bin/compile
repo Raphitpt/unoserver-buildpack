@@ -7,12 +7,13 @@ ENV_DIR=$3
 
 # Load common functions
 BP_DIR=$(cd "$(dirname "$0")"; cd ..; pwd)
-source "${BP_DIR}/lib/apt.sh"
+source "${BP_DIR}/lib/common.sh"
 
 topic "Installing unoserver buildpack"
 
 # Liste des dépendances APT nécessaires
-APT_DEPS="python3 python3-pip python3-uno libreoffice-core libreoffice-writer libreoffice-calc"
+# Note: python3-minimal contient le binaire python3, pas juste le métapackage
+APT_DEPS="python3-minimal python3-pip python3-uno libreoffice-core libreoffice-writer libreoffice-calc libreoffice-impress"
 
 # Installer les dépendances via apt-buildpack
 apt_install "${APT_DEPS}" "${BUILD_DIR}" "${CACHE_DIR}" "${ENV_DIR}"
@@ -20,22 +21,64 @@ apt_install "${APT_DEPS}" "${BUILD_DIR}" "${CACHE_DIR}" "${ENV_DIR}"
 # Répertoire d'installation du apt-buildpack
 APT_DIR="$BUILD_DIR/.apt"
 
-# Chercher python3
+# Chercher python3 - chercher aussi les versions spécifiques
 topic "Locating Python installation"
+
+# Debug: voir ce qui a été installé
+echo "Contents of apt/usr/bin:" | indent
+ls -la "$APT_DIR/usr/bin/" 2>&1 | grep -i python | indent || echo "No python found in usr/bin" | indent
+
+# Chercher dans tous les chemins possibles, y compris les versions spécifiques
 PYTHON_BIN=""
-for path in "$APT_DIR/usr/bin/python3" "$APT_DIR/bin/python3" "$APT_DIR/usr/bin/python3.10" "$APT_DIR/usr/bin/python3.12"; do
-  if [ -f "$path" ]; then
+for path in \
+  "$APT_DIR/usr/bin/python3" \
+  "$APT_DIR/bin/python3" \
+  "$APT_DIR/usr/bin/python3.12" \
+  "$APT_DIR/usr/bin/python3.11" \
+  "$APT_DIR/usr/bin/python3.10" \
+  "$APT_DIR/usr/bin/python3.9" \
+  "$APT_DIR/usr/bin/python3.8"
+do
+  if [ -f "$path" ] && [ -x "$path" ]; then
     PYTHON_BIN="$path"
     echo "Found Python at: $PYTHON_BIN" | indent
     break
   fi
 done
 
+# Si toujours pas trouvé, chercher n'importe quel binaire python3.X
+if [ -z "$PYTHON_BIN" ]; then
+  echo "Searching for any python3.X binary..." | indent
+  PYTHON_BIN=$(find "$APT_DIR" -type f -executable -name "python3.*" 2>/dev/null | head -1)
+  if [ -n "$PYTHON_BIN" ]; then
+    echo "Found Python at: $PYTHON_BIN" | indent
+  fi
+fi
+
 if [ -z "$PYTHON_BIN" ]; then
   warn "Python3 not found anywhere in $APT_DIR"
-  echo "Searching for Python binaries:" | indent
-  find "$APT_DIR" -type f -name "python*" 2>/dev/null | indent || true
-  exit 1
+  echo "Full search results:" | indent
+  find "$APT_DIR" -type f -name "*python*" 2>/dev/null | indent || true
+  echo ""
+  echo "Trying alternative: installing python3.12 explicitly" | indent
+  
+  # Tentative avec python3.12 explicitement
+  APT_DEPS_ALT="python3.12 python3.12-minimal python3-pip python3-uno libreoffice-core libreoffice-writer libreoffice-calc"
+  apt_install "${APT_DEPS_ALT}" "${BUILD_DIR}" "${CACHE_DIR}" "${ENV_DIR}"
+  
+  # Nouvelle recherche
+  for path in "$APT_DIR/usr/bin/python3.12" "$APT_DIR/usr/bin/python3"; do
+    if [ -f "$path" ] && [ -x "$path" ]; then
+      PYTHON_BIN="$path"
+      echo "Found Python at: $PYTHON_BIN" | indent
+      break
+    fi
+  done
+  
+  if [ -z "$PYTHON_BIN" ]; then
+    warn "Still cannot find Python binary"
+    exit 1
+  fi
 fi
 
 # Configuration environnement
@@ -45,9 +88,9 @@ export LIBRARY_PATH="$APT_DIR/lib/x86_64-linux-gnu:$APT_DIR/usr/lib/x86_64-linux
 export INCLUDE_PATH="$APT_DIR/usr/include:$APT_DIR/usr/include/x86_64-linux-gnu:${INCLUDE_PATH:-}"
 export PKG_CONFIG_PATH="$APT_DIR/usr/lib/x86_64-linux-gnu/pkgconfig:$APT_DIR/usr/lib/i386-linux-gnu/pkgconfig:$APT_DIR/usr/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 
-# Construire PYTHONPATH
+# Construire PYTHONPATH avec tous les dist-packages disponibles
 export PYTHONPATH=""
-for pydir in "$APT_DIR"/usr/lib/python3.*; do
+for pydir in "$APT_DIR"/usr/lib/python3*; do
   if [ -d "$pydir/dist-packages" ]; then
     export PYTHONPATH="$pydir/dist-packages:$PYTHONPATH"
   fi
@@ -57,6 +100,7 @@ done
 topic "Testing Python installation"
 "$PYTHON_BIN" --version 2>&1 | indent || {
   warn "Python3 cannot execute"
+  echo "Checking library dependencies:" | indent
   ldd "$PYTHON_BIN" 2>&1 | indent || true
   exit 1
 }
@@ -71,6 +115,12 @@ fi
 
 echo "Detected Python ${PYTHON_VERSION}" | indent
 
+# Si python3 n'existe pas comme symlink, le créer
+if [ ! -f "$APT_DIR/usr/bin/python3" ] && [ "$PYTHON_BIN" != "$APT_DIR/usr/bin/python3" ]; then
+  topic "Creating python3 symlink"
+  ln -sf "$(basename $PYTHON_BIN)" "$APT_DIR/usr/bin/python3"
+fi
+
 # Installation de unoserver
 PYTHON_SITE_PACKAGES="$BUILD_DIR/.local/lib/python${PYTHON_VERSION}/site-packages"
 mkdir -p "$PYTHON_SITE_PACKAGES"
@@ -78,9 +128,17 @@ mkdir -p "$PYTHON_SITE_PACKAGES"
 topic "Checking pip availability"
 "$PYTHON_BIN" -m pip --version 2>&1 | indent || {
   warn "pip module not available, attempting bootstrap"
-  curl -sS https://bootstrap.pypa.io/get-pip.py | "$PYTHON_BIN" - --target="$PYTHON_SITE_PACKAGES" 2>&1 | indent || {
-    warn "Cannot install pip"
-    exit 1
+  
+  # Essayer d'installer pip via ensurepip (intégré à Python)
+  "$PYTHON_BIN" -m ensurepip --upgrade --default-pip 2>&1 | indent || {
+    # Si ensurepip échoue, utiliser get-pip.py
+    echo "ensurepip failed, trying get-pip.py" | indent
+    curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
+    "$PYTHON_BIN" /tmp/get-pip.py --target="$PYTHON_SITE_PACKAGES" 2>&1 | indent || {
+      warn "Cannot install pip"
+      exit 1
+    }
+    rm -f /tmp/get-pip.py
   }
   export PYTHONPATH="$PYTHON_SITE_PACKAGES:$PYTHONPATH"
 }
@@ -126,7 +184,7 @@ export PYTHONPATH="/app/.local/lib/python${PYTHON_VERSION}/site-packages:\$PYTHO
 EOF
 
 # Ajouter dynamiquement les chemins Python
-for pydir in "$APT_DIR"/usr/lib/python3.*; do
+for pydir in "$APT_DIR"/usr/lib/python3*; do
   if [ -d "$pydir/dist-packages" ]; then
     PYVER=$(basename "$pydir")
     echo "export PYTHONPATH=\"/app/.apt/usr/lib/$PYVER/dist-packages:\$PYTHONPATH\"" >> "$PROFILE_PATH"
