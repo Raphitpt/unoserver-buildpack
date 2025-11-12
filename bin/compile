@@ -8,24 +8,37 @@ ENV_DIR=$3
 
 echo "-----> Installing unoserver buildpack"
 
-# Update package lists
-echo "-----> Updating package lists"
-apt-get update
+# Function to install APT dependencies using Scalingo's apt-buildpack
+install_apt_deps() {
+  local build_dir="$1"
+  local cache_dir="$2"
+  local env_dir="$3"
 
-# Install LibreOffice and dependencies
-echo "-----> Installing LibreOffice and dependencies"
-apt-get install -y --no-install-recommends \
-    python3-pip \
-    libreoffice-writer \
-    python3-uno \
-    libreoffice-script-provider-python \
-    fonts-liberation \
-    fonts-dejavu \
-    netcat-openbsd
+  echo "-----> Installing dependencies with APT buildpack"
 
-# Clean up apt cache
-rm -rf /var/lib/apt/lists/*
-apt-get clean
+  # Create Aptfile with required packages
+  cat >> "$build_dir/Aptfile" <<EOF
+python3-pip
+libreoffice-writer
+python3-uno
+libreoffice-script-provider-python
+fonts-liberation
+fonts-dejavu
+netcat-openbsd
+EOF
+
+  apt_deps_buildpack_dir=$(mktemp -d apt_buildpack_XXXX)
+
+  APT_BUILDPACK_URL="${APT_BUILDPACK_URL:-https://github.com/Scalingo/apt-buildpack}"
+  git clone --depth=1 "$APT_BUILDPACK_URL" "$apt_deps_buildpack_dir"
+
+  "${apt_deps_buildpack_dir}/bin/compile" "$build_dir" "$cache_dir" "$env_dir"
+
+  rm -rf "$apt_deps_buildpack_dir"
+}
+
+# Install APT dependencies
+install_apt_deps "$BUILD_DIR" "$CACHE_DIR" "$ENV_DIR"
 
 # Install unoserver via pip
 echo "-----> Installing unoserver"
@@ -39,6 +52,20 @@ if [ -d "$BUILD_DIR/fonts" ]; then
     fc-cache -f -v
 fi
 
+# Install Bun if not already installed
+if ! command -v bun &> /dev/null; then
+    echo "-----> Installing Bun"
+    curl -fsSL https://bun.sh/install | bash
+    export BUN_INSTALL="$HOME/.bun"
+    export PATH="$BUN_INSTALL/bin:$PATH"
+fi
+
+# Install application dependencies
+if [ -f "$BUILD_DIR/package.json" ]; then
+    echo "-----> Installing application dependencies with Bun"
+    cd "$BUILD_DIR"
+    bun install
+fi
 
 # Make server.sh executable
 if [ -f "$BUILD_DIR/server.sh" ]; then
