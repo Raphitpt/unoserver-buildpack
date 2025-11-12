@@ -1,6 +1,5 @@
 #!/bin/sh
 set -e
-
 if [ -n "$BUILDPACK_DEBUG" ] ; then
   set -x
 fi
@@ -8,7 +7,6 @@ fi
 BUILD_DIR=$1
 CACHE_DIR=$2
 ENV_DIR=$3
-
 VENDOR_DIR="$BUILD_DIR/vendor"
 LIBRE_OFFICE_DIR="$VENDOR_DIR/libreoffice"
 
@@ -32,25 +30,29 @@ fi
 
 # Trouver le Python intégré dans LibreOffice
 PYTHON="$LIBRE_OFFICE_PROGRAM_DIR/python"
-
 if [ ! -x "$PYTHON" ]; then
   echo "ERROR: Python not found in LibreOffice at $PYTHON"
   exit 1
 fi
 
 echo "-----> Using LibreOffice's Python: $PYTHON"
-"$PYTHON" --version
+PYTHON_VERSION=$("$PYTHON" --version 2>&1 | grep -oP '\d+\.\d+' | head -1)
+echo "Python $PYTHON_VERSION"
+
+# Choisir la bonne URL de get-pip.py selon la version de Python
+GET_PIP_URL="https://bootstrap.pypa.io/get-pip.py"
 
 # Installer pip si nécessaire
-if ! [ -e "$CACHE_DIR/get-pip.py" ]; then
-  echo "-----> Downloading get-pip.py"
-  curl -sSL https://bootstrap.pypa.io/get-pip.py -o "$CACHE_DIR/get-pip.py"
+GET_PIP_FILE="$CACHE_DIR/get-pip-$PYTHON_VERSION.py"
+if ! [ -e "$GET_PIP_FILE" ]; then
+  echo "-----> Downloading get-pip.py for Python $PYTHON_VERSION"
+  curl -sSL "$GET_PIP_URL" -o "$GET_PIP_FILE"
 else
   echo "-----> Using cached get-pip.py"
 fi
 
 echo "-----> Installing pip"
-"$PYTHON" "$CACHE_DIR/get-pip.py" --no-warn-script-location
+"$PYTHON" "$GET_PIP_FILE" --no-warn-script-location
 
 # Trouver le répertoire python-core
 PYTHON_CORE_VERSION=$(ls "$LIBRE_OFFICE_PROGRAM_DIR" | grep python-core)
@@ -58,51 +60,43 @@ PYTHON_CORE_DIR="$LIBRE_OFFICE_PROGRAM_DIR/$PYTHON_CORE_VERSION"
 
 echo "-----> Found Python core: $PYTHON_CORE_VERSION"
 
-PIP="$PYTHON_CORE_DIR/bin/pip"
-
 # Installer unoserver
 echo "-----> Installing unoserver"
-"$PYTHON" "$PIP" install unoserver --no-warn-script-location
+"$PYTHON" -m pip install unoserver --no-warn-script-location
 
-# Chemins des binaires unoserver
-UNO_DIR="$HOME/vendor/libreoffice/opt/$LIBRE_OFFICE_VERSION/program/$PYTHON_CORE_VERSION/bin"
+# Chemins runtime (avec /app au lieu de $HOME)
+RUNTIME_PYTHON="/app/vendor/libreoffice/opt/$LIBRE_OFFICE_VERSION/program/python"
 
 # Créer le profil d'environnement
 PROFILE_PATH="$BUILD_DIR/.profile.d/unoserver.sh"
 mkdir -p $(dirname "$PROFILE_PATH")
-
 echo "-----> Writing profile script"
 cat > "$PROFILE_PATH" <<EOF
 # unoserver environment
-export UNOSERVER_PATH=$UNO_DIR/unoserver
-export UNOCONVERT_PATH=$UNO_DIR/unoconvert
-export UNOCOMPARE_PATH=$UNO_DIR/unocompare
+export LIBREOFFICE_PYTHON="$RUNTIME_PYTHON"
 EOF
 
 # Créer des wrappers dans bin/
 mkdir -p "$BUILD_DIR/bin"
 
 echo "-----> Creating unoserver wrapper"
-cat > "$BUILD_DIR/bin/unoserver" <<'EOF'
+cat > "$BUILD_DIR/bin/unoserver" <<EOF
 #!/bin/sh
-PYTHON="$HOME/vendor/libreoffice/opt/*/program/python"
-exec $PYTHON "$UNOSERVER_PATH" "$@"
+exec $RUNTIME_PYTHON -m unoserver "\$@"
 EOF
 chmod +x "$BUILD_DIR/bin/unoserver"
 
 echo "-----> Creating unoconvert wrapper"
-cat > "$BUILD_DIR/bin/unoconvert" <<'EOF'
+cat > "$BUILD_DIR/bin/unoconvert" <<EOF
 #!/bin/sh
-PYTHON="$HOME/vendor/libreoffice/opt/*/program/python"
-exec $PYTHON "$UNOCONVERT_PATH" "$@"
+exec $RUNTIME_PYTHON -m unoserver.converter "\$@"
 EOF
 chmod +x "$BUILD_DIR/bin/unoconvert"
 
 echo "-----> Creating unocompare wrapper"
-cat > "$BUILD_DIR/bin/unocompare" <<'EOF'
+cat > "$BUILD_DIR/bin/unocompare" <<EOF
 #!/bin/sh
-PYTHON="$HOME/vendor/libreoffice/opt/*/program/python"
-exec $PYTHON "$UNOCOMPARE_PATH" "$@"
+exec $RUNTIME_PYTHON -m unoserver.comparer "\$@"
 EOF
 chmod +x "$BUILD_DIR/bin/unocompare"
 
