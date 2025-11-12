@@ -1,41 +1,109 @@
-#!/bin/bash
+#!/bin/sh
 set -e
+
+if [ -n "$BUILDPACK_DEBUG" ] ; then
+  set -x
+fi
 
 BUILD_DIR=$1
 CACHE_DIR=$2
 ENV_DIR=$3
 
-# Load common functions
-BP_DIR=$(cd "$(dirname "$0")"; cd ..; pwd)
-source "${BP_DIR}/lib/apt.sh"
+VENDOR_DIR="$BUILD_DIR/vendor"
+LIBRE_OFFICE_DIR="$VENDOR_DIR/libreoffice"
 
-topic "Installing LibreOffice for unoserver"
+# Vérifier que LibreOffice est installé
+if [ ! -d "$LIBRE_OFFICE_DIR" ]; then
+  echo "ERROR: LibreOffice not found in $LIBRE_OFFICE_DIR"
+  echo "Make sure the LibreOffice buildpack is listed BEFORE unoserver buildpack"
+  exit 1
+fi
 
-# Liste des dépendances APT nécessaires
-APT_DEPS="python3-uno libreoffice-core libreoffice-writer libreoffice-calc libreoffice-impress"
+LIBRE_OFFICE_VERSION=$(ls "$LIBRE_OFFICE_DIR/opt")
+LIBRE_OFFICE_PROGRAM_DIR="$LIBRE_OFFICE_DIR/opt/$LIBRE_OFFICE_VERSION/program"
 
-# Installer les dépendances via apt-buildpack
-apt_install "${APT_DEPS}" "${BUILD_DIR}" "${CACHE_DIR}" "${ENV_DIR}"
+echo "-----> Found LibreOffice $LIBRE_OFFICE_VERSION"
 
-APT_DIR="$BUILD_DIR/.apt"
+# Créer un symlink libreoffice vers soffice si nécessaire
+if [ ! -e "$LIBRE_OFFICE_PROGRAM_DIR/libreoffice" ]; then
+  echo "-----> Creating libreoffice symlink"
+  cp "$LIBRE_OFFICE_PROGRAM_DIR/soffice" "$LIBRE_OFFICE_PROGRAM_DIR/libreoffice"
+fi
 
-# Configuration du profil d'exécution
-topic "Configuring runtime environment"
-PROFILE_PATH="$BUILD_DIR/.profile.d/libreoffice.sh"
-mkdir -p "$(dirname "$PROFILE_PATH")"
+# Trouver le Python intégré dans LibreOffice
+PYTHON="$LIBRE_OFFICE_PROGRAM_DIR/python"
 
-cat > "$PROFILE_PATH" <<'EOF'
-# LibreOffice runtime environment
-export PATH="/app/.apt/usr/bin:/app/.apt/usr/sbin:$PATH"
-export LD_LIBRARY_PATH="/app/.apt/lib/x86_64-linux-gnu:/app/.apt/usr/lib/x86_64-linux-gnu:/app/.apt/usr/lib/i386-linux-gnu:/app/.apt/lib:/app/.apt/usr/lib:$LD_LIBRARY_PATH"
+if [ ! -x "$PYTHON" ]; then
+  echo "ERROR: Python not found in LibreOffice at $PYTHON"
+  exit 1
+fi
+
+echo "-----> Using LibreOffice's Python: $PYTHON"
+"$PYTHON" --version
+
+# Installer pip si nécessaire
+if ! [ -e "$CACHE_DIR/get-pip.py" ]; then
+  echo "-----> Downloading get-pip.py"
+  curl -sSL https://bootstrap.pypa.io/get-pip.py -o "$CACHE_DIR/get-pip.py"
+else
+  echo "-----> Using cached get-pip.py"
+fi
+
+echo "-----> Installing pip"
+"$PYTHON" "$CACHE_DIR/get-pip.py" --no-warn-script-location
+
+# Trouver le répertoire python-core
+PYTHON_CORE_VERSION=$(ls "$LIBRE_OFFICE_PROGRAM_DIR" | grep python-core)
+PYTHON_CORE_DIR="$LIBRE_OFFICE_PROGRAM_DIR/$PYTHON_CORE_VERSION"
+
+echo "-----> Found Python core: $PYTHON_CORE_VERSION"
+
+PIP="$PYTHON_CORE_DIR/bin/pip"
+
+# Installer unoserver
+echo "-----> Installing unoserver"
+"$PYTHON" "$PIP" install unoserver --no-warn-script-location
+
+# Chemins des binaires unoserver
+UNO_DIR="$HOME/vendor/libreoffice/opt/$LIBRE_OFFICE_VERSION/program/$PYTHON_CORE_VERSION/bin"
+
+# Créer le profil d'environnement
+PROFILE_PATH="$BUILD_DIR/.profile.d/unoserver.sh"
+mkdir -p $(dirname "$PROFILE_PATH")
+
+echo "-----> Writing profile script"
+cat > "$PROFILE_PATH" <<EOF
+# unoserver environment
+export UNOSERVER_PATH=$UNO_DIR/unoserver
+export UNOCONVERT_PATH=$UNO_DIR/unoconvert
+export UNOCOMPARE_PATH=$UNO_DIR/unocompare
 EOF
 
-# Ajouter python3-uno au PYTHONPATH
-for pydir in "$APT_DIR"/usr/lib/python3*; do
-  if [ -d "$pydir/dist-packages" ]; then
-    PYVER=$(basename "$pydir")
-    echo "export PYTHONPATH=\"/app/.apt/usr/lib/$PYVER/dist-packages:\$PYTHONPATH\"" >> "$PROFILE_PATH"
-  fi
-done
+# Créer des wrappers dans bin/
+mkdir -p "$BUILD_DIR/bin"
 
-topic "LibreOffice installation complete!"
+echo "-----> Creating unoserver wrapper"
+cat > "$BUILD_DIR/bin/unoserver" <<'EOF'
+#!/bin/sh
+PYTHON="$HOME/vendor/libreoffice/opt/*/program/python"
+exec $PYTHON "$UNOSERVER_PATH" "$@"
+EOF
+chmod +x "$BUILD_DIR/bin/unoserver"
+
+echo "-----> Creating unoconvert wrapper"
+cat > "$BUILD_DIR/bin/unoconvert" <<'EOF'
+#!/bin/sh
+PYTHON="$HOME/vendor/libreoffice/opt/*/program/python"
+exec $PYTHON "$UNOCONVERT_PATH" "$@"
+EOF
+chmod +x "$BUILD_DIR/bin/unoconvert"
+
+echo "-----> Creating unocompare wrapper"
+cat > "$BUILD_DIR/bin/unocompare" <<'EOF'
+#!/bin/sh
+PYTHON="$HOME/vendor/libreoffice/opt/*/program/python"
+exec $PYTHON "$UNOCOMPARE_PATH" "$@"
+EOF
+chmod +x "$BUILD_DIR/bin/unocompare"
+
+echo "-----> unoserver installation complete!"
