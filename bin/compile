@@ -1,0 +1,49 @@
+#!/bin/bash
+
+set -e
+
+BUILD_DIR=$1
+CACHE_DIR=$2
+ENV_DIR=$3
+
+echo "-----> Installing unoserver buildpack"
+
+# Update package lists
+echo "-----> Updating package lists"
+apt-get update
+
+# Install LibreOffice and dependencies
+echo "-----> Installing LibreOffice and dependencies"
+apt-get install -y --no-install-recommends \
+    python3-pip \
+    libreoffice-writer \
+    python3-uno \
+    libreoffice-script-provider-python \
+    fonts-liberation \
+    fonts-dejavu \
+    netcat-openbsd
+
+# Clean up apt cache
+rm -rf /var/lib/apt/lists/*
+apt-get clean
+
+# Install unoserver via pip
+echo "-----> Installing unoserver"
+pip3 install --break-system-packages unoserver
+
+# Install custom fonts if they exist
+if [ -d "$BUILD_DIR/fonts" ]; then
+    echo "-----> Installing custom fonts"
+    mkdir -p /usr/share/fonts/truetype/custom/
+    cp "$BUILD_DIR/fonts/"* /usr/share/fonts/truetype/custom/ || true
+    fc-cache -f -v
+fi
+
+
+# Make server.sh executable
+if [ -f "$BUILD_DIR/server.sh" ]; then
+    echo "-----> Making server.sh executable"
+    chmod +x "$BUILD_DIR/server.sh"
+fi
+
+echo "-----> Build complete!"
