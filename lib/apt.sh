@@ -18,16 +18,16 @@ function apt_install() {
   local cache_dir="${3}"
   local env_dir="${4}"
 
-  apt_manifest="$(mktemp "${build_dir}/Aptfile.unoserver-XXX")"
+  local apt_manifest="$(mktemp "${build_dir}/Aptfile.unoserver-XXX")"
   echo "${apt_deps}" | tr ' ' '\n' > "${apt_manifest}"
 
-  apt_deps_buildpack_dir=$(mktemp -d /tmp/apt_buildpack_XXXX)
-  readonly apt_buildpack_url="https://github.com/Scalingo/apt-buildpack.git"
+  local apt_deps_buildpack_dir=$(mktemp -d /tmp/apt_buildpack_XXXX)
+  local apt_buildpack_url="https://github.com/Scalingo/apt-buildpack.git"
 
   topic "Cloning apt-buildpack for dependencies"
   git clone --quiet --depth=1 "${apt_buildpack_url}" "${apt_deps_buildpack_dir}" >/dev/null 2>&1
 
-  readonly apt_log_file=$(mktemp /tmp/apt_log_XXXX.log)
+  local apt_log_file=$(mktemp /tmp/apt_log_XXXX.log)
 
   topic "Installing apt dependencies: ${apt_deps}"
   APT_FILE_MANIFEST="$(basename ${apt_manifest})" "${apt_deps_buildpack_dir}/bin/compile" "${build_dir}" "${cache_dir}" "${env_dir}" >"${apt_log_file}" 2>&1
@@ -37,6 +37,9 @@ function apt_install() {
     echo
     warn "Failed to install apt packages: $apt_deps"
     echo
+    rm -f "${apt_manifest}"
+    rm -rf "${apt_deps_buildpack_dir}"
+    rm -f "${apt_log_file}"
     exit 1
   fi
 

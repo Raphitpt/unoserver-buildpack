@@ -12,8 +12,8 @@ source "${BP_DIR}/lib/apt.sh"
 topic "Installing unoserver buildpack"
 
 # Liste des dépendances APT nécessaires
-# Note: python3-minimal contient le binaire python3, pas juste le métapackage
-APT_DEPS="python3-minimal python3-pip python3-uno libreoffice-core libreoffice-writer libreoffice-calc libreoffice-impress"
+# Il faut python3.10 (le binaire réel), pas juste python3-minimal (qui ne contient que le symlink)
+APT_DEPS="python3.10 python3.10-minimal libpython3.10-stdlib python3-pip python3-uno libreoffice-core libreoffice-writer libreoffice-calc libreoffice-impress"
 
 # Installer les dépendances via apt-buildpack
 apt_install "${APT_DEPS}" "${BUILD_DIR}" "${CACHE_DIR}" "${ENV_DIR}"
@@ -21,64 +21,55 @@ apt_install "${APT_DEPS}" "${BUILD_DIR}" "${CACHE_DIR}" "${ENV_DIR}"
 # Répertoire d'installation du apt-buildpack
 APT_DIR="$BUILD_DIR/.apt"
 
-# Chercher python3 - chercher aussi les versions spécifiques
+# Chercher python3
 topic "Locating Python installation"
 
 # Debug: voir ce qui a été installé
-echo "Contents of apt/usr/bin:" | indent
+echo "Contents of apt/usr/bin (python related):" | indent
 ls -la "$APT_DIR/usr/bin/" 2>&1 | grep -i python | indent || echo "No python found in usr/bin" | indent
 
-# Chercher dans tous les chemins possibles, y compris les versions spécifiques
+# Chercher le binaire python3 (qui devrait être un symlink vers python3.10)
 PYTHON_BIN=""
-for path in \
-  "$APT_DIR/usr/bin/python3" \
-  "$APT_DIR/bin/python3" \
-  "$APT_DIR/usr/bin/python3.12" \
-  "$APT_DIR/usr/bin/python3.11" \
-  "$APT_DIR/usr/bin/python3.10" \
-  "$APT_DIR/usr/bin/python3.9" \
-  "$APT_DIR/usr/bin/python3.8"
-do
-  if [ -f "$path" ] && [ -x "$path" ]; then
-    PYTHON_BIN="$path"
-    echo "Found Python at: $PYTHON_BIN" | indent
-    break
-  fi
-done
-
-# Si toujours pas trouvé, chercher n'importe quel binaire python3.X
-if [ -z "$PYTHON_BIN" ]; then
-  echo "Searching for any python3.X binary..." | indent
-  PYTHON_BIN=$(find "$APT_DIR" -type f -executable -name "python3.*" 2>/dev/null | head -1)
-  if [ -n "$PYTHON_BIN" ]; then
-    echo "Found Python at: $PYTHON_BIN" | indent
+if [ -L "$APT_DIR/usr/bin/python3" ]; then
+  # Suivre le symlink
+  PYTHON_TARGET=$(readlink -f "$APT_DIR/usr/bin/python3" 2>/dev/null || readlink "$APT_DIR/usr/bin/python3")
+  if [ -f "$PYTHON_TARGET" ] && [ -x "$PYTHON_TARGET" ]; then
+    PYTHON_BIN="$PYTHON_TARGET"
+    echo "Found Python at: $PYTHON_BIN (via symlink)" | indent
   fi
 fi
 
+# Si pas trouvé via symlink, chercher directement
 if [ -z "$PYTHON_BIN" ]; then
-  warn "Python3 not found anywhere in $APT_DIR"
-  echo "Full search results:" | indent
-  find "$APT_DIR" -type f -name "*python*" 2>/dev/null | indent || true
-  echo ""
-  echo "Trying alternative: installing python3.12 explicitly" | indent
-
-  # Tentative avec python3.12 explicitement
-  APT_DEPS_ALT="python3.12 python3.12-minimal python3-pip python3-uno libreoffice-core libreoffice-writer libreoffice-calc"
-  apt_install "${APT_DEPS_ALT}" "${BUILD_DIR}" "${CACHE_DIR}" "${ENV_DIR}"
-
-  # Nouvelle recherche
-  for path in "$APT_DIR/usr/bin/python3.12" "$APT_DIR/usr/bin/python3"; do
+  for path in \
+    "$APT_DIR/usr/bin/python3.10" \
+    "$APT_DIR/usr/bin/python3.12" \
+    "$APT_DIR/usr/bin/python3.11" \
+    "$APT_DIR/usr/bin/python3" \
+    "$APT_DIR/bin/python3"
+  do
     if [ -f "$path" ] && [ -x "$path" ]; then
       PYTHON_BIN="$path"
       echo "Found Python at: $PYTHON_BIN" | indent
       break
     fi
   done
+fi
 
-  if [ -z "$PYTHON_BIN" ]; then
-    warn "Still cannot find Python binary"
-    exit 1
+# Recherche exhaustive si toujours pas trouvé
+if [ -z "$PYTHON_BIN" ]; then
+  echo "Searching for any python executable..." | indent
+  PYTHON_BIN=$(find "$APT_DIR/usr/bin" -type f -executable \( -name "python3" -o -name "python3.*" \) 2>/dev/null | head -1)
+  if [ -n "$PYTHON_BIN" ]; then
+    echo "Found Python at: $PYTHON_BIN" | indent
   fi
+fi
+
+if [ -z "$PYTHON_BIN" ]; then
+  warn "Python3 binary not found"
+  echo "Looking for python in lib directories..." | indent
+  find "$APT_DIR" -type f -name "python3*" ! -path "*/dist-packages/*" ! -path "*/site-packages/*" 2>/dev/null | head -20 | indent
+  exit 1
 fi
 
 # Configuration environnement
@@ -91,8 +82,13 @@ export PKG_CONFIG_PATH="$APT_DIR/usr/lib/x86_64-linux-gnu/pkgconfig:$APT_DIR/usr
 # Construire PYTHONPATH avec tous les dist-packages disponibles
 export PYTHONPATH=""
 for pydir in "$APT_DIR"/usr/lib/python3*; do
-  if [ -d "$pydir/dist-packages" ]; then
-    export PYTHONPATH="$pydir/dist-packages:$PYTHONPATH"
+  if [ -d "$pydir" ]; then
+    if [ -d "$pydir/dist-packages" ]; then
+      export PYTHONPATH="$pydir/dist-packages:$PYTHONPATH"
+    fi
+    if [ -d "$pydir/lib-dynload" ]; then
+      export PYTHONPATH="$pydir/lib-dynload:$PYTHONPATH"
+    fi
   fi
 done
 
@@ -114,12 +110,6 @@ if [ $? -ne 0 ]; then
 fi
 
 echo "Detected Python ${PYTHON_VERSION}" | indent
-
-# Si python3 n'existe pas comme symlink, le créer
-if [ ! -f "$APT_DIR/usr/bin/python3" ] && [ "$PYTHON_BIN" != "$APT_DIR/usr/bin/python3" ]; then
-  topic "Creating python3 symlink"
-  ln -sf "$(basename $PYTHON_BIN)" "$APT_DIR/usr/bin/python3"
-fi
 
 # Installation de unoserver
 PYTHON_SITE_PACKAGES="$BUILD_DIR/.local/lib/python${PYTHON_VERSION}/site-packages"
@@ -188,6 +178,10 @@ for pydir in "$APT_DIR"/usr/lib/python3*; do
   if [ -d "$pydir/dist-packages" ]; then
     PYVER=$(basename "$pydir")
     echo "export PYTHONPATH=\"/app/.apt/usr/lib/$PYVER/dist-packages:\$PYTHONPATH\"" >> "$PROFILE_PATH"
+  fi
+  if [ -d "$pydir/lib-dynload" ]; then
+    PYVER=$(basename "$pydir")
+    echo "export PYTHONPATH=\"/app/.apt/usr/lib/$PYVER/lib-dynload:\$PYTHONPATH\"" >> "$PROFILE_PATH"
   fi
 done
 
