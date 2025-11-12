@@ -7,7 +7,7 @@ ENV_DIR=$3
 
 # Load common functions
 BP_DIR=$(cd "$(dirname "$0")"; cd ..; pwd)
-source "${BP_DIR}/lib/common.sh"
+source "${BP_DIR}/lib/apt.sh"
 
 topic "Installing unoserver buildpack"
 
@@ -61,11 +61,11 @@ if [ -z "$PYTHON_BIN" ]; then
   find "$APT_DIR" -type f -name "*python*" 2>/dev/null | indent || true
   echo ""
   echo "Trying alternative: installing python3.12 explicitly" | indent
-  
+
   # Tentative avec python3.12 explicitement
   APT_DEPS_ALT="python3.12 python3.12-minimal python3-pip python3-uno libreoffice-core libreoffice-writer libreoffice-calc"
   apt_install "${APT_DEPS_ALT}" "${BUILD_DIR}" "${CACHE_DIR}" "${ENV_DIR}"
-  
+
   # Nouvelle recherche
   for path in "$APT_DIR/usr/bin/python3.12" "$APT_DIR/usr/bin/python3"; do
     if [ -f "$path" ] && [ -x "$path" ]; then
@@ -74,7 +74,7 @@ if [ -z "$PYTHON_BIN" ]; then
       break
     fi
   done
-  
+
   if [ -z "$PYTHON_BIN" ]; then
     warn "Still cannot find Python binary"
     exit 1
@@ -128,7 +128,7 @@ mkdir -p "$PYTHON_SITE_PACKAGES"
 topic "Checking pip availability"
 "$PYTHON_BIN" -m pip --version 2>&1 | indent || {
   warn "pip module not available, attempting bootstrap"
-  
+
   # Essayer d'installer pip via ensurepip (intégré à Python)
   "$PYTHON_BIN" -m ensurepip --upgrade --default-pip 2>&1 | indent || {
     # Si ensurepip échoue, utiliser get-pip.py
