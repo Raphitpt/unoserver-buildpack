@@ -18,7 +18,6 @@ install_apt_deps() {
 
   # Create Aptfile with required packages
   cat >> "$build_dir/Aptfile" <<EOF
-python3-pip
 libreoffice-writer
 python3-uno
 libreoffice-script-provider-python
@@ -37,12 +36,36 @@ EOF
   rm -rf "$apt_deps_buildpack_dir"
 }
 
+# Function to install Python dependencies using Scalingo's python-buildpack
+install_python_deps() {
+  local build_dir="$1"
+  local cache_dir="$2"
+  local env_dir="$3"
+
+  echo "-----> Installing Python dependencies with Python buildpack"
+
+  # Create requirements.txt with unoserver if it doesn't exist
+  if [ ! -f "$build_dir/requirements.txt" ]; then
+    cat > "$build_dir/requirements.txt" <<EOF
+unoserver
+EOF
+  fi
+
+  python_buildpack_dir=$(mktemp -d python_buildpack_XXXX)
+
+  PYTHON_BUILDPACK_URL="${PYTHON_BUILDPACK_URL:-https://github.com/Scalingo/python-buildpack}"
+  git clone --depth=1 "$PYTHON_BUILDPACK_URL" "$python_buildpack_dir"
+
+  "${python_buildpack_dir}/bin/compile" "$build_dir" "$cache_dir" "$env_dir"
+
+  rm -rf "$python_buildpack_dir"
+}
+
 # Install APT dependencies
 install_apt_deps "$BUILD_DIR" "$CACHE_DIR" "$ENV_DIR"
 
-# Install unoserver via pip
-echo "-----> Installing unoserver"
-pip3 install --break-system-packages unoserver
+# Install Python dependencies (unoserver)
+install_python_deps "$BUILD_DIR" "$CACHE_DIR" "$ENV_DIR"
 
 # Install custom fonts if they exist
 if [ -d "$BUILD_DIR/fonts" ]; then
