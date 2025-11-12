@@ -5,35 +5,36 @@ BUILD_DIR=$1
 CACHE_DIR=$2
 ENV_DIR=$3
 
-echo "-----> Installing unoserver buildpack"
+# Load common functions
+BP_DIR=$(cd "$(dirname "$0")"; cd ..; pwd)
+source "${BP_DIR}/lib/apt.sh"
+
+topic "Installing unoserver buildpack"
+
+# Liste des dépendances APT nécessaires
+APT_DEPS="python3 python3-pip python3-uno libreoffice-core libreoffice-writer libreoffice-calc"
+
+# Installer les dépendances via apt-buildpack
+apt_install "${APT_DEPS}" "${BUILD_DIR}" "${CACHE_DIR}" "${ENV_DIR}"
 
 # Répertoire d'installation du apt-buildpack
 APT_DIR="$BUILD_DIR/.apt"
 
-echo "-----> Debug: Full APT structure"
-find "$APT_DIR" -name "python*" -type f 2>/dev/null | head -n 20 || true
-
-echo "-----> Debug: Checking for Python in various locations"
-ls -la "$APT_DIR/usr/bin/python"* 2>/dev/null || echo "No python in usr/bin"
-ls -la "$APT_DIR/bin/python"* 2>/dev/null || echo "No python in bin"
-
-# Chercher python3 dans tous les chemins possibles
+# Chercher python3
+topic "Locating Python installation"
 PYTHON_BIN=""
 for path in "$APT_DIR/usr/bin/python3" "$APT_DIR/bin/python3" "$APT_DIR/usr/bin/python3.10" "$APT_DIR/usr/bin/python3.12"; do
   if [ -f "$path" ]; then
     PYTHON_BIN="$path"
-    echo "-----> Found Python at: $PYTHON_BIN"
+    echo "Found Python at: $PYTHON_BIN" | indent
     break
   fi
 done
 
 if [ -z "$PYTHON_BIN" ]; then
-  echo "ERROR: python3 not found anywhere in $APT_DIR"
-  echo "-----> Listing all .apt contents:"
-  find "$APT_DIR" -type f -name "*python*" 2>/dev/null || true
-  echo ""
-  echo "Make sure apt-buildpack is listed BEFORE this buildpack in .buildpacks"
-  echo "and that your Aptfile includes: python3, python3-pip, python3-uno, libreoffice"
+  warn "Python3 not found anywhere in $APT_DIR"
+  echo "Searching for Python binaries:" | indent
+  find "$APT_DIR" -type f -name "python*" 2>/dev/null | indent || true
   exit 1
 fi
 
@@ -41,73 +42,76 @@ fi
 export PATH="$APT_DIR/usr/bin:$APT_DIR/usr/sbin:$APT_DIR/bin:$PATH"
 export LD_LIBRARY_PATH="$APT_DIR/lib/x86_64-linux-gnu:$APT_DIR/usr/lib/x86_64-linux-gnu:$APT_DIR/usr/lib/i386-linux-gnu:$APT_DIR/lib:$APT_DIR/usr/lib:${LD_LIBRARY_PATH:-}"
 export LIBRARY_PATH="$APT_DIR/lib/x86_64-linux-gnu:$APT_DIR/usr/lib/x86_64-linux-gnu:$APT_DIR/usr/lib/i386-linux-gnu:$APT_DIR/lib:$APT_DIR/usr/lib:${LIBRARY_PATH:-}"
-export PYTHONPATH="$APT_DIR/usr/lib/python3/dist-packages:${PYTHONPATH:-}"
+export INCLUDE_PATH="$APT_DIR/usr/include:$APT_DIR/usr/include/x86_64-linux-gnu:${INCLUDE_PATH:-}"
+export PKG_CONFIG_PATH="$APT_DIR/usr/lib/x86_64-linux-gnu/pkgconfig:$APT_DIR/usr/lib/i386-linux-gnu/pkgconfig:$APT_DIR/usr/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 
-# Ajouter tous les chemins python possibles au PYTHONPATH
+# Construire PYTHONPATH
+export PYTHONPATH=""
 for pydir in "$APT_DIR"/usr/lib/python3.*; do
   if [ -d "$pydir/dist-packages" ]; then
     export PYTHONPATH="$pydir/dist-packages:$PYTHONPATH"
   fi
 done
 
-echo "-----> Testing Python installation"
-"$PYTHON_BIN" --version || {
-  echo "ERROR: Python3 cannot execute"
-  ldd "$PYTHON_BIN" || true
+# Tester Python
+topic "Testing Python installation"
+"$PYTHON_BIN" --version 2>&1 | indent || {
+  warn "Python3 cannot execute"
+  ldd "$PYTHON_BIN" 2>&1 | indent || true
   exit 1
 }
 
 # Détection de la version Python
 PYTHON_VERSION=$("$PYTHON_BIN" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>&1)
 if [ $? -ne 0 ]; then
-  echo "ERROR: Cannot detect Python version"
-  echo "$PYTHON_VERSION"
+  warn "Cannot detect Python version"
+  echo "$PYTHON_VERSION" | indent
   exit 1
 fi
 
-echo "-----> Detected Python ${PYTHON_VERSION}"
+echo "Detected Python ${PYTHON_VERSION}" | indent
 
 # Installation de unoserver
 PYTHON_SITE_PACKAGES="$BUILD_DIR/.local/lib/python${PYTHON_VERSION}/site-packages"
 mkdir -p "$PYTHON_SITE_PACKAGES"
 
-echo "-----> Checking pip availability"
-"$PYTHON_BIN" -m pip --version 2>&1 || {
-  echo "ERROR: pip module not available"
-  echo "Attempting to install pip..."
-  # Télécharger get-pip.py si pip n'est pas disponible
-  curl -sS https://bootstrap.pypa.io/get-pip.py | "$PYTHON_BIN" - --target="$PYTHON_SITE_PACKAGES" || {
-    echo "ERROR: Cannot install pip"
+topic "Checking pip availability"
+"$PYTHON_BIN" -m pip --version 2>&1 | indent || {
+  warn "pip module not available, attempting bootstrap"
+  curl -sS https://bootstrap.pypa.io/get-pip.py | "$PYTHON_BIN" - --target="$PYTHON_SITE_PACKAGES" 2>&1 | indent || {
+    warn "Cannot install pip"
     exit 1
   }
   export PYTHONPATH="$PYTHON_SITE_PACKAGES:$PYTHONPATH"
 }
 
-echo "-----> Installing unoserver (Python ${PYTHON_VERSION})..."
+topic "Installing unoserver (Python ${PYTHON_VERSION})"
+
+# Upgrade pip/setuptools/wheel
+"$PYTHON_BIN" -m pip install \
+  --no-cache-dir \
+  --target="$PYTHON_SITE_PACKAGES" \
+  --upgrade \
+  pip setuptools wheel 2>&1 | indent
 
 # Installer unoserver
 "$PYTHON_BIN" -m pip install \
   --no-cache-dir \
   --target="$PYTHON_SITE_PACKAGES" \
-  --upgrade \
-  pip setuptools wheel 2>&1 | sed 's/^/       /'
-
-"$PYTHON_BIN" -m pip install \
-  --no-cache-dir \
-  --target="$PYTHON_SITE_PACKAGES" \
-  unoserver 2>&1 | sed 's/^/       /'
+  unoserver 2>&1 | indent
 
 # Vérifier l'installation
 if [ ! -d "$PYTHON_SITE_PACKAGES/unoserver" ]; then
-  echo "ERROR: unoserver installation failed"
-  ls -la "$PYTHON_SITE_PACKAGES" | head -n 20
+  warn "unoserver installation failed"
+  echo "Contents of site-packages:" | indent
+  ls -la "$PYTHON_SITE_PACKAGES" 2>&1 | head -n 20 | indent
   exit 1
 fi
 
-echo "-----> unoserver installed successfully"
+echo "unoserver installed successfully" | indent
 
 # Configuration du profil d'exécution
-echo "-----> Configuring runtime environment"
+topic "Configuring runtime environment"
 PROFILE_PATH="$BUILD_DIR/.profile.d/unoserver.sh"
 mkdir -p "$(dirname "$PROFILE_PATH")"
 
@@ -115,9 +119,10 @@ cat > "$PROFILE_PATH" <<EOF
 # unoserver runtime environment
 export PATH="/app/.apt/usr/bin:/app/.apt/usr/sbin:/app/.apt/bin:\$PATH"
 export LD_LIBRARY_PATH="/app/.apt/lib/x86_64-linux-gnu:/app/.apt/usr/lib/x86_64-linux-gnu:/app/.apt/usr/lib/i386-linux-gnu:/app/.apt/lib:/app/.apt/usr/lib:\$LD_LIBRARY_PATH"
+export LIBRARY_PATH="/app/.apt/lib/x86_64-linux-gnu:/app/.apt/usr/lib/x86_64-linux-gnu:/app/.apt/usr/lib/i386-linux-gnu:/app/.apt/lib:/app/.apt/usr/lib:\$LIBRARY_PATH"
+export INCLUDE_PATH="/app/.apt/usr/include:/app/.apt/usr/include/x86_64-linux-gnu:\$INCLUDE_PATH"
+export PKG_CONFIG_PATH="/app/.apt/usr/lib/x86_64-linux-gnu/pkgconfig:/app/.apt/usr/lib/i386-linux-gnu/pkgconfig:/app/.apt/usr/lib/pkgconfig:\$PKG_CONFIG_PATH"
 export PYTHONPATH="/app/.local/lib/python${PYTHON_VERSION}/site-packages:\$PYTHONPATH"
-
-# Ajouter les chemins python du système
 EOF
 
 # Ajouter dynamiquement les chemins Python
@@ -128,4 +133,7 @@ for pydir in "$APT_DIR"/usr/lib/python3.*; do
   fi
 done
 
-echo "-----> unoserver buildpack installation complete!"
+topic "unoserver buildpack installation complete!"
+
+# Test final
+"$PYTHON_BIN" -c "import sys; sys.path.insert(0, '$PYTHON_SITE_PACKAGES'); import unoserver; print('unoserver version:', unoserver.__version__)" 2>&1 | indent || echo "Version check failed, but installation may still work" | indent
