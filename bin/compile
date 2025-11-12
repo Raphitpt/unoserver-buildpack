@@ -10,6 +10,12 @@ echo "-----> Installing unoserver buildpack"
 # Répertoire d'installation du apt-buildpack
 APT_DIR="$BUILD_DIR/.apt"
 
+echo "-----> Debug: Listing installed APT binaries"
+ls -la $BUILD_DIR/.apt/usr/bin || true
+echo "-----> Debug: Listing installed APT libs"
+ls -la $BUILD_DIR/.apt/usr/lib | head -n 20 || true
+
+
 # Vérifie que python3 du apt-buildpack existe
 if [ ! -f "$APT_DIR/usr/bin/python3" ]; then
   echo "ERROR: python3 not found in $APT_DIR/usr/bin/"
