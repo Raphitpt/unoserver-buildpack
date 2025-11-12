@@ -75,6 +75,15 @@ install_python_deps "$BUILD_DIR" "$CACHE_DIR" "$ENV_DIR"
 #    fc-cache -f -v
 #fi
 
+# Configure PYTHONPATH to include system python3-uno and PATH for apt binaries
+echo "-----> Configuring PYTHONPATH for uno module and PATH for apt binaries"
+PROFILE_PATH="$BUILD_DIR/.profile.d/python-uno.sh"
+mkdir -p $(dirname $PROFILE_PATH)
+cat > $PROFILE_PATH <<'EOF'
+export PYTHONPATH="/app/.apt/usr/lib/python3/dist-packages:$PYTHONPATH"
+export PATH="/app/.apt/usr/bin:$PATH"
+EOF
+
 # Make server.sh executable
 if [ -f "$BUILD_DIR/server.sh" ]; then
     echo "-----> Making server.sh executable"
