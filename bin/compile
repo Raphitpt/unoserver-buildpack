@@ -16,10 +16,12 @@ install_apt_deps() {
 
   echo "-----> Installing dependencies with APT buildpack"
 
-  # Create Aptfile with required packages
+  # Create Aptfile with required packages including python3 and pip
   cat >> "$build_dir/Aptfile" <<EOF
 libreoffice-writer
+python3
 python3-uno
+python3-pip
 libreoffice-script-provider-python
 fonts-liberation
 fonts-dejavu
@@ -36,36 +38,16 @@ EOF
   rm -rf "$apt_deps_buildpack_dir"
 }
 
-# Function to install Python dependencies using Scalingo's python-buildpack
-install_python_deps() {
-  local build_dir="$1"
-  local cache_dir="$2"
-  local env_dir="$3"
-
-  echo "-----> Installing Python dependencies with Python buildpack"
-
-  # Create requirements.txt with unoserver if it doesn't exist
-  if [ ! -f "$build_dir/requirements.txt" ]; then
-    cat > "$build_dir/requirements.txt" <<EOF
-unoserver
-EOF
-  fi
-
-  python_buildpack_dir=$(mktemp -d python_buildpack_XXXX)
-
-  PYTHON_BUILDPACK_URL="${PYTHON_BUILDPACK_URL:-https://github.com/Scalingo/python-buildpack}"
-  git clone --depth=1 "$PYTHON_BUILDPACK_URL" "$python_buildpack_dir"
-
-  "${python_buildpack_dir}/bin/compile" "$build_dir" "$cache_dir" "$env_dir"
-
-  rm -rf "$python_buildpack_dir"
-}
-
 # Install APT dependencies
 install_apt_deps "$BUILD_DIR" "$CACHE_DIR" "$ENV_DIR"
 
-# Install Python dependencies (unoserver)
-install_python_deps "$BUILD_DIR" "$CACHE_DIR" "$ENV_DIR"
+# Install unoserver using system Python3 and pip from apt
+echo "-----> Installing unoserver with system Python"
+export PATH="/app/.apt/usr/bin:$PATH"
+export LD_LIBRARY_PATH="/app/.apt/usr/lib/x86_64-linux-gnu:/app/.apt/usr/lib:$LD_LIBRARY_PATH"
+
+# Use pip from apt to install unoserver
+/app/.apt/usr/bin/python3 -m pip install --target="$BUILD_DIR/.local/lib/python3/site-packages" unoserver
 
 ## Install custom fonts if they exist
 #if [ -d "$BUILD_DIR/fonts" ]; then
@@ -75,13 +57,14 @@ install_python_deps "$BUILD_DIR" "$CACHE_DIR" "$ENV_DIR"
 #    fc-cache -f -v
 #fi
 
-# Configure PYTHONPATH to include system python3-uno and PATH for apt binaries
-echo "-----> Configuring PYTHONPATH for uno module and PATH for apt binaries"
-PROFILE_PATH="$BUILD_DIR/.profile.d/python-uno.sh"
+# Configure environment variables for runtime
+echo "-----> Configuring environment variables"
+PROFILE_PATH="$BUILD_DIR/.profile.d/unoserver.sh"
 mkdir -p $(dirname $PROFILE_PATH)
 cat > $PROFILE_PATH <<'EOF'
-export PYTHONPATH="/app/.apt/usr/lib/python3/dist-packages:$PYTHONPATH"
 export PATH="/app/.apt/usr/bin:$PATH"
+export LD_LIBRARY_PATH="/app/.apt/usr/lib/x86_64-linux-gnu:/app/.apt/usr/lib:$LD_LIBRARY_PATH"
+export PYTHONPATH="/app/.local/lib/python3/site-packages:/app/.apt/usr/lib/python3/dist-packages:$PYTHONPATH"
 EOF
 
 # Make server.sh executable
