@@ -7,7 +7,7 @@ ENV_DIR=$3
 
 # Load common functions
 BP_DIR=$(cd "$(dirname "$0")"; cd ..; pwd)
-source "${BP_DIR}/lib/common.sh"
+source "${BP_DIR}/lib/apt.sh"
 
 topic "Installing unoserver buildpack"
 
