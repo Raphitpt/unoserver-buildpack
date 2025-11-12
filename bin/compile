@@ -9,91 +9,28 @@ ENV_DIR=$3
 BP_DIR=$(cd "$(dirname "$0")"; cd ..; pwd)
 source "${BP_DIR}/lib/apt.sh"
 
-topic "Installing unoserver buildpack"
+topic "Installing LibreOffice for unoserver"
 
-# Liste des dépendances APT nécessaires (juste LibreOffice et python3-uno)
+# Liste des dépendances APT nécessaires
 APT_DEPS="python3-uno libreoffice-core libreoffice-writer libreoffice-calc libreoffice-impress"
 
 # Installer les dépendances via apt-buildpack
 apt_install "${APT_DEPS}" "${BUILD_DIR}" "${CACHE_DIR}" "${ENV_DIR}"
 
-# Utiliser le Python de Scalingo
-topic "Using Scalingo Python"
-
-# Le Python de Scalingo est dans /app/.scalingo/python/bin/python3
-PYTHON_BIN="python3"
-
-# Vérifier que Python est disponible
-if ! command -v python3 &> /dev/null; then
-  warn "Python3 not found. Make sure Python buildpack is listed BEFORE unoserver buildpack in .buildpacks"
-  exit 1
-fi
-
-# Afficher la version
-python3 --version | indent
-
-# Détection de la version Python
-PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>&1)
-if [ $? -ne 0 ]; then
-  warn "Cannot detect Python version"
-  echo "$PYTHON_VERSION" | indent
-  exit 1
-fi
-
-echo "Detected Python ${PYTHON_VERSION}" | indent
-
-# Installation de unoserver
-PYTHON_SITE_PACKAGES="$BUILD_DIR/.local/lib/python${PYTHON_VERSION}/site-packages"
-mkdir -p "$PYTHON_SITE_PACKAGES"
-
-topic "Checking pip availability"
-python3 -m pip --version | indent || {
-  warn "pip module not available"
-  exit 1
-}
-
-topic "Installing unoserver (Python ${PYTHON_VERSION})"
-
-# Installer unoserver
-python3 -m pip install \
-  --disable-pip-version-check \
-  --no-cache-dir \
-  --no-input \
-  --target="$PYTHON_SITE_PACKAGES" \
-  unoserver 2>&1 | indent
-
-# Vérifier l'installation
-if [ ! -d "$PYTHON_SITE_PACKAGES/unoserver" ]; then
-  warn "unoserver installation failed"
-  echo "Contents of site-packages:" | indent
-  ls -la "$PYTHON_SITE_PACKAGES" 2>&1 | head -n 20 | indent
-  exit 1
-fi
-
-echo "unoserver installed successfully" | indent
-
-# Répertoire d'installation du apt-buildpack
 APT_DIR="$BUILD_DIR/.apt"
 
 # Configuration du profil d'exécution
 topic "Configuring runtime environment"
-PROFILE_PATH="$BUILD_DIR/.profile.d/unoserver.sh"
+PROFILE_PATH="$BUILD_DIR/.profile.d/libreoffice.sh"
 mkdir -p "$(dirname "$PROFILE_PATH")"
 
-cat > "$PROFILE_PATH" <<EOF
-# unoserver runtime environment
-
-# Ajouter les binaires et libs de LibreOffice
-export PATH="/app/.apt/usr/bin:/app/.apt/usr/sbin:\$PATH"
-export LD_LIBRARY_PATH="/app/.apt/lib/x86_64-linux-gnu:/app/.apt/usr/lib/x86_64-linux-gnu:/app/.apt/usr/lib/i386-linux-gnu:/app/.apt/lib:/app/.apt/usr/lib:\$LD_LIBRARY_PATH"
-
-# Ajouter unoserver au PYTHONPATH
-export PYTHONPATH="/app/.local/lib/python${PYTHON_VERSION}/site-packages:\$PYTHONPATH"
-
-# Ajouter python3-uno (installé via apt) au PYTHONPATH
+cat > "$PROFILE_PATH" <<'EOF'
+# LibreOffice runtime environment
+export PATH="/app/.apt/usr/bin:/app/.apt/usr/sbin:$PATH"
+export LD_LIBRARY_PATH="/app/.apt/lib/x86_64-linux-gnu:/app/.apt/usr/lib/x86_64-linux-gnu:/app/.apt/usr/lib/i386-linux-gnu:/app/.apt/lib:/app/.apt/usr/lib:$LD_LIBRARY_PATH"
 EOF
 
-# Ajouter dynamiquement les chemins Python de python3-uno
+# Ajouter python3-uno au PYTHONPATH
 for pydir in "$APT_DIR"/usr/lib/python3*; do
   if [ -d "$pydir/dist-packages" ]; then
     PYVER=$(basename "$pydir")
@@ -101,7 +38,4 @@ for pydir in "$APT_DIR"/usr/lib/python3*; do
   fi
 done
 
-topic "unoserver buildpack installation complete!"
-
-# Test final
-python3 -c "import sys; sys.path.insert(0, '$PYTHON_SITE_PACKAGES'); import unoserver; print('unoserver version:', unoserver.__version__)" 2>&1 | indent || echo "Version check failed, but installation may still work" | indent
+topic "LibreOffice installation complete!"
