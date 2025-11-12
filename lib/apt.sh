@@ -43,7 +43,7 @@ function apt_install() {
     exit 1
   fi
 
-  # Source new libs for future operations (update of LD_LIBRARY_PATH)
+  # Source new libs for future operations
   if [ -f "${apt_deps_buildpack_dir}/export" ]; then
     topic "Sourcing apt-buildpack environment"
     source "${apt_deps_buildpack_dir}/export"
