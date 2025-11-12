@@ -40,7 +40,13 @@ PYTHON_VERSION=$("$PYTHON" --version 2>&1 | grep -oP '\d+\.\d+' | head -1)
 echo "Python $PYTHON_VERSION"
 
 # Choisir la bonne URL de get-pip.py selon la version de Python
-GET_PIP_URL="https://bootstrap.pypa.io/get-pip.py"
+if [ "$PYTHON_VERSION" = "3.8" ]; then
+  GET_PIP_URL="https://bootstrap.pypa.io/pip/3.8/get-pip.py"
+elif [ "$PYTHON_VERSION" = "3.9" ]; then
+  GET_PIP_URL="https://bootstrap.pypa.io/pip/3.9/get-pip.py"
+else
+  GET_PIP_URL="https://bootstrap.pypa.io/get-pip.py"
+fi
 
 # Installer pip si nécessaire
 GET_PIP_FILE="$CACHE_DIR/get-pip-$PYTHON_VERSION.py"
@@ -66,6 +72,7 @@ echo "-----> Installing unoserver"
 
 # Chemins runtime (avec /app au lieu de $HOME)
 RUNTIME_PYTHON="/app/vendor/libreoffice/opt/$LIBRE_OFFICE_VERSION/program/python"
+RUNTIME_UNO_DIR="/app/vendor/libreoffice/opt/$LIBRE_OFFICE_VERSION/program/$PYTHON_CORE_VERSION/bin"
 
 # Créer le profil d'environnement
 PROFILE_PATH="$BUILD_DIR/.profile.d/unoserver.sh"
@@ -74,6 +81,7 @@ echo "-----> Writing profile script"
 cat > "$PROFILE_PATH" <<EOF
 # unoserver environment
 export LIBREOFFICE_PYTHON="$RUNTIME_PYTHON"
+export UNOSERVER_BIN="$RUNTIME_UNO_DIR"
 EOF
 
 # Créer des wrappers dans bin/
@@ -82,21 +90,21 @@ mkdir -p "$BUILD_DIR/bin"
 echo "-----> Creating unoserver wrapper"
 cat > "$BUILD_DIR/bin/unoserver" <<EOF
 #!/bin/sh
-exec $RUNTIME_PYTHON -m unoserver "\$@"
+exec $RUNTIME_PYTHON $RUNTIME_UNO_DIR/unoserver "\$@"
 EOF
 chmod +x "$BUILD_DIR/bin/unoserver"
 
 echo "-----> Creating unoconvert wrapper"
 cat > "$BUILD_DIR/bin/unoconvert" <<EOF
 #!/bin/sh
-exec $RUNTIME_PYTHON -m unoserver.converter "\$@"
+exec $RUNTIME_PYTHON $RUNTIME_UNO_DIR/unoconvert "\$@"
 EOF
 chmod +x "$BUILD_DIR/bin/unoconvert"
 
 echo "-----> Creating unocompare wrapper"
 cat > "$BUILD_DIR/bin/unocompare" <<EOF
 #!/bin/sh
-exec $RUNTIME_PYTHON -m unoserver.comparer "\$@"
+exec $RUNTIME_PYTHON $RUNTIME_UNO_DIR/unocompare "\$@"
 EOF
 chmod +x "$BUILD_DIR/bin/unocompare"
 
