@@ -75,21 +75,6 @@ if [ -d "$BUILD_DIR/fonts" ]; then
     fc-cache -f -v
 fi
 
-# Install Bun if not already installed
-if ! command -v bun &> /dev/null; then
-    echo "-----> Installing Bun"
-    curl -fsSL https://bun.sh/install | bash
-    export BUN_INSTALL="$HOME/.bun"
-    export PATH="$BUN_INSTALL/bin:$PATH"
-fi
-
-# Install application dependencies
-if [ -f "$BUILD_DIR/package.json" ]; then
-    echo "-----> Installing application dependencies with Bun"
-    cd "$BUILD_DIR"
-    bun install
-fi
-
 # Make server.sh executable
 if [ -f "$BUILD_DIR/server.sh" ]; then
     echo "-----> Making server.sh executable"
