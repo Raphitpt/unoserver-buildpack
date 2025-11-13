@@ -39,7 +39,7 @@ export URE_BOOTSTRAP="vnd.sun.star.pathname:$PROGRAM_DIR/fundamentalrc"
 export UNO_PATH="$PROGRAM_DIR"
 export LD_LIBRARY_PATH="$APPDIR/lib:$APPDIR/usr/lib:$LD_LIBRARY_PATH"
 export PYTHONPATH="$PROGRAM_DIR"
-export SAL_USE_VCLPLUGIN=gen
+export SAL_USE_VCLPLUGIN=headless
 export SAL_DISABLEGUI=1
 
 # --- Installer pip et unoserver ---
@@ -61,7 +61,7 @@ export URE_BOOTSTRAP="vnd.sun.star.pathname:\$APPDIR/program/fundamentalrc"
 export UNO_PATH="\$APPDIR/program"
 export LD_LIBRARY_PATH="\$APPDIR/lib:\$APPDIR/usr/lib:\$LD_LIBRARY_PATH"
 export PYTHONPATH="\$APPDIR/program"
-export SAL_USE_VCLPLUGIN=gen
+export SAL_USE_VCLPLUGIN=headless
 export SAL_DISABLEGUI=1
 export LIBREOFFICE_PYTHON="\$APPDIR/program/python"
 EOF
