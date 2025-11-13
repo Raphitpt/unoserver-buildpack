@@ -27,7 +27,7 @@ echo "-----> Using LibreOffice's Python: $PYTHON"
 # --- Préparer pip ---
 PYTHON_VERSION=$("$PYTHON" --version 2>&1 | grep -oP '\d+\.\d+' | head -1)
 GET_PIP_FILE="$CACHE_DIR/get-pip-$PYTHON_VERSION.py"
-GET_PIP_URL="https://bootstrap.pypa.io/get-pip.py"
+GET_PIP_URL="https://bootstrap.pypa.io/pip/3.8/get-pip.py"
 
 if [ ! -e "$GET_PIP_FILE" ]; then
   echo "-----> Downloading get-pip.py"
